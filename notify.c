@@ -7,8 +7,10 @@
 
 #define LOWERVOL 122
 #define INCREASEVOL 123
+#define AUDIONAME "Audacious"
 
 uint8_t run = 1;
+pa_sink_input_info sinkinfo;
 
 NotifyNotification *initnotif() {
 	notify_init("musicbar");
@@ -32,25 +34,49 @@ void uninit(NotifyNotification *notif) {
 	notify_uninit();
 }
 
-void changevol(int8_t vol) {
-	
-}
-
-void shownotif(NotifyNotification *notif, int8_t vol) {
+void shownotif(NotifyNotification *notif, int8_t vol) { //Update and then show notification
 	notify_notification_set_hint(notif, "value", g_variant_new_int32(vol));
 	notify_notification_show(notif, NULL);
 }
 
-pa_sink_input_info test;
-void parsesinks(pa_context *c, const pa_sink_input_info *i, int eol, void *userdata) {
-	if(i != NULL && strcmp(i->name, "Audacious") == 0) {
-		memcpy(&test, i, sizeof(pa_sink_input_info));
+void parsesinks(pa_context *c, const pa_sink_input_info *i, int eol, void *userdata) { //Callback to set sinkinfo
+	if(i != NULL && strcmp(i->name, AUDIONAME) == 0) {
+		memcpy(&sinkinfo, i, sizeof(pa_sink_input_info));
 		pa_threaded_mainloop_signal( *(pa_threaded_mainloop **)userdata, 0);
 	}
 }
 
-void pa_state_callback(pa_context *c, void *userdata) {
+void volumesinkcb(pa_context *c, int success, void *userdata) { //callback for setting volume
+	pa_threaded_mainloop_signal( *(pa_threaded_mainloop **)userdata, 0);
+}
+
+void pa_state_callback(pa_context *c, void *userdata) { //callback for getting context state
 	*(pa_context_state_t *)userdata = pa_context_get_state(c);
+}
+
+uint8_t volumestuff(pa_context *context, pa_threaded_mainloop *mainloop, int16_t add) { //get volume from sink input, add to it, then set the new values
+	pa_threaded_mainloop_lock(mainloop);
+	pa_operation *op;
+	
+	op = pa_context_get_sink_input_info_list(context, parsesinks, &mainloop);
+	while(pa_operation_get_state(op) == PA_OPERATION_RUNNING) pa_threaded_mainloop_wait(mainloop);
+	pa_operation_unref(op);
+	
+	int32_t volume = add + sinkinfo.volume.values[0];
+	if(volume > 65536) volume = 65536;
+	if(volume < 0) volume = 0;
+	
+	for(uint8_t i = 0; i < sinkinfo.volume.channels; i++) {
+		sinkinfo.volume.values[i] = volume;
+	}
+	
+	op = pa_context_set_sink_input_volume(context, sinkinfo.index, &sinkinfo.volume, volumesinkcb, &mainloop);
+	while(pa_operation_get_state(op) == PA_OPERATION_RUNNING) pa_threaded_mainloop_wait(mainloop);
+	pa_operation_unref(op);
+	
+	pa_threaded_mainloop_unlock(mainloop);
+	
+	return (uint8_t)(volume / 655);
 }
 
 int main() {
@@ -68,24 +94,12 @@ int main() {
 	puts("Started mainloop");
 	while(ready != PA_CONTEXT_READY);
 	puts("Connected");
-	
-	pa_threaded_mainloop_lock(mainloop);
-	pa_operation *getsinkop = pa_context_get_sink_input_info_list(context, parsesinks, &mainloop);
-	while(pa_operation_get_state(getsinkop) == PA_OPERATION_RUNNING) pa_threaded_mainloop_wait(mainloop);
-	pa_operation_unref(getsinkop);
-	pa_threaded_mainloop_unlock(mainloop);
-	
-	printf(">>> %u%\n", test.volume.values[0]/655);
 		
 	XEvent ev;
 	while(run) {
 		XNextEvent(display, &ev);
 		if(ev.type == KeyPress) {
-			int8_t vol = ((ev.xkey.keycode == LOWERVOL) ? -5 : 5);
-			if(vol > 100) vol = 100;
-			if(vol < 0) vol = 0;
-			changevol(vol);
-			shownotif(notif, vol);
+			shownotif(notif, volumestuff(context, mainloop, ((ev.xkey.keycode == LOWERVOL) ? -655 : 655)) );
 		}
 	}
 	
