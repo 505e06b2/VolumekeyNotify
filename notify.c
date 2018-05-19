@@ -4,13 +4,16 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 #define LOWERVOL 122
 #define INCREASEVOL 123
 #define AUDIONAME "Audacious"
+#define ICON "audio-speakers"
 
 uint8_t run = 1;
 pa_sink_input_info sinkinfo;
+time_t last = 0;
 
 
 Display *inithotkeys() {
@@ -22,17 +25,25 @@ Display *inithotkeys() {
 	return display;
 }
 
-void uninit(NotifyNotification *notif) {
-	g_object_unref(G_OBJECT(notif));
-	notify_uninit();
+NotifyNotification *initnotif() {
+	notify_init("musicbar");
+	NotifyNotification *notif = notify_notification_new(AUDIONAME, NULL, ICON);
+	notify_notification_set_timeout(notif, (gint)300);
+	notify_notification_set_hint(notif, "synchronous", g_variant_new_string("volume"));
+	return notif;
 }
 
 NotifyNotification *shownotif(NotifyNotification **notif, int8_t vol) { //Update and then show notification
-	if(*notif != NULL) notify_notification_close(*notif, NULL);
-	*notif = notify_notification_new(NULL, NULL, "audio-speakers");
-	notify_notification_set_hint(*notif, "synchronous", g_variant_new_string("volume"));
+	if(time(NULL) > last) {
+		notify_notification_close(*notif, NULL);
+		g_object_unref(G_OBJECT(*notif));
+		notify_uninit();
+		*notif = initnotif();
+		puts("Killed notification");
+	}
+	
+	last = time(NULL)+5;
 	notify_notification_set_hint(*notif, "value", g_variant_new_int32(vol));
-	notify_notification_set_timeout(*notif, (gint)300);
 	notify_notification_show(*notif, NULL);
 }
 
@@ -78,7 +89,8 @@ uint8_t volumestuff(pa_context *context, pa_threaded_mainloop *mainloop, int16_t
 
 int main() {
 	notify_init("musicbar");
-	NotifyNotification *notif = NULL;
+	last = time(NULL);
+	NotifyNotification *notif = initnotif();
 	Display *display = inithotkeys();
 	
 	pa_threaded_mainloop *mainloop = pa_threaded_mainloop_new();
@@ -100,7 +112,5 @@ int main() {
 			shownotif(&notif, volumestuff(context, mainloop, ((ev.xkey.keycode == LOWERVOL) ? -655 : 655)) );
 		}
 	}
-	
-	uninit(notif);
 	return 0;
 }
