@@ -12,13 +12,6 @@
 uint8_t run = 1;
 pa_sink_input_info sinkinfo;
 
-NotifyNotification *initnotif() {
-	notify_init("musicbar");
-	NotifyNotification *n = notify_notification_new(NULL, NULL, "audio-speakers");
-	notify_notification_set_hint(n, "synchronous", g_variant_new_string("volume"));
-	notify_notification_set_hint(n, "id", g_variant_new_string("2002"));
-	return n;
-}
 
 Display *inithotkeys() {
 	Display *display = XOpenDisplay(0);
@@ -34,9 +27,13 @@ void uninit(NotifyNotification *notif) {
 	notify_uninit();
 }
 
-void shownotif(NotifyNotification *notif, int8_t vol) { //Update and then show notification
-	notify_notification_set_hint(notif, "value", g_variant_new_int32(vol));
-	notify_notification_show(notif, NULL);
+NotifyNotification *shownotif(NotifyNotification **notif, int8_t vol) { //Update and then show notification
+	if(*notif != NULL) notify_notification_close(*notif, NULL);
+	*notif = notify_notification_new(NULL, NULL, "audio-speakers");
+	notify_notification_set_hint(*notif, "synchronous", g_variant_new_string("volume"));
+	notify_notification_set_hint(*notif, "value", g_variant_new_int32(vol));
+	notify_notification_set_timeout(*notif, (gint)300);
+	notify_notification_show(*notif, NULL);
 }
 
 void parsesinks(pa_context *c, const pa_sink_input_info *i, int eol, void *userdata) { //Callback to set sinkinfo
@@ -80,7 +77,8 @@ uint8_t volumestuff(pa_context *context, pa_threaded_mainloop *mainloop, int16_t
 }
 
 int main() {
-	NotifyNotification *notif = initnotif();
+	notify_init("musicbar");
+	NotifyNotification *notif = NULL;
 	Display *display = inithotkeys();
 	
 	pa_threaded_mainloop *mainloop = pa_threaded_mainloop_new();
@@ -99,7 +97,7 @@ int main() {
 	while(run) {
 		XNextEvent(display, &ev);
 		if(ev.type == KeyPress) {
-			shownotif(notif, volumestuff(context, mainloop, ((ev.xkey.keycode == LOWERVOL) ? -655 : 655)) );
+			shownotif(&notif, volumestuff(context, mainloop, ((ev.xkey.keycode == LOWERVOL) ? -655 : 655)) );
 		}
 	}
 	
